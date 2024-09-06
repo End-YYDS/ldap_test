@@ -124,17 +124,17 @@ fn ldap_bind(ldap: &mut LdapConn, admin_dn: &str, admin_password: &str) -> Resul
     Ok(())
 }
 
-fn ldap_add_entry(ldap: &mut LdapConn, dn: &str, attrs: Vec<(&str, Vec<&str>)>) -> Result<()> {
+fn ldap_add_entry(ldap: &mut LdapConn, base_dn: &str, attrs: Vec<(&str, Vec<&str>)>) -> Result<()> {
     let attrs: Vec<(&str, HashSet<&str>)> = attrs
         .into_iter()
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect();
-    ldap.add(dn, attrs)?;
+    ldap.add(base_dn, attrs)?;
     Ok(())
 }
 
-fn ldap_modify_entry(ldap: &mut LdapConn, dn: &str, mods: Vec<Mod<&str>>) -> Result<()> {
-    ldap.modify(dn, mods)?;
+fn ldap_modify_entry(ldap: &mut LdapConn, base_dn: &str, mods: Vec<Mod<&str>>) -> Result<()> {
+    ldap.modify(base_dn, mods)?;
     Ok(())
 }
 fn ldap_search_entry(
@@ -152,7 +152,25 @@ fn ldap_change_password(ldap: &mut LdapConn, dn: &str, new_password: &str) -> Re
     let mut password_set = HashSet::new();
     password_set.insert(new_password);
     let mods = vec![Mod::Replace("userPassword", password_set)];
-    ldap_modify_entry(ldap, dn, mods)
+    ldap_modify_entry(ldap, dn, mods)?;
+    println!("Password modification successful for DN: {}", dn);
+    match verify_password(ldap, dn, new_password) {
+        Ok(_) => {
+            println!("Password verification successful: Password changed and works.");
+            Ok(())
+        }
+        Err(e) => {
+            println!("Password verification failed: {}", e);
+            Err(e)
+        }
+    }
+}
+fn verify_password(ldap: &mut LdapConn, dn: &str, password: &str) -> Result<()> {
+    ldap.simple_bind(dn, password)?.success()?;
+    Ok(())
+}
+fn user_dn(uid: &str, gid: &str, base_dn: &str) -> String {
+    format!("uid={},ou={},{}", uid, gid, base_dn)
 }
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
@@ -176,9 +194,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "gidNumber",
             "homeDirectory",
             "loginShell",
+            "userPassword",
         ],
     )?;
-    println!("{:?}", ret);
-    // ldap.simple_bind(&bind_dn, &bind_pw)?.success()?;
+    // println!("{:?}", ret);
+    ldap_change_password(
+        &mut ldap,
+        &user_dn("john", "People", &base_dn),
+        "test12345678",
+    )?;
     Ok(())
 }
